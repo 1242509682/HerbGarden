@@ -1,5 +1,4 @@
-﻿using System.Collections.Concurrent;
-using Microsoft.Xna.Framework;
+﻿using Microsoft.Xna.Framework;
 using Terraria;
 using Terraria.ID;
 using TerrariaApi.Server;
@@ -16,7 +15,7 @@ public class HerbGarden : TerrariaPlugin
     public static string PluginName => "草药园"; // 插件名称
     public override string Name => PluginName;
     public override string Author => "羽学";
-    public override Version Version => new(1, 0, 1);
+    public override Version Version => new(1, 0, 2);
     public override string Description => "草药无视原版条件生长，实现自动掉落与种植，扩大电线箱子吸入物品范围等功能";
     #endregion
 
@@ -32,8 +31,6 @@ public class HerbGarden : TerrariaPlugin
         GeneralHooks.ReloadEvent += ReloadConfig;
         On.Terraria.WorldGen.GrowAlch += GrowAlch;
         On.Terraria.Wiring.Hopper += Hopper;
-        ServerApi.Hooks.GameUpdate.Register(this, OnGameUpdate);
-        GetDataHandlers.TileEdit.Register(this.OnTileEdit);
     }
 
     protected override void Dispose(bool disposing)
@@ -43,8 +40,6 @@ public class HerbGarden : TerrariaPlugin
             GeneralHooks.ReloadEvent -= ReloadConfig;
             On.Terraria.WorldGen.GrowAlch -= GrowAlch;
             On.Terraria.Wiring.Hopper -= Hopper;
-            ServerApi.Hooks.GameUpdate.Deregister(this, OnGameUpdate);
-            GetDataHandlers.TileEdit.UnRegister(this.OnTileEdit);
         }
         base.Dispose(disposing);
     }
@@ -74,29 +69,18 @@ public class HerbGarden : TerrariaPlugin
             return;
         }
 
-        var tile = Main.tile[x, y];
-
         // 如果不是随机
         if (!Config.Random)
         {
-            // 如果草药已经成熟，立即收割
             orig(x, y);
-
-            if (tile.type == TileID.BloomingHerbs &&
-                HasNearbyChest(x, y, Config.HopperRange))
-            {
-                // 如果成熟了，加入队列
-                var pos = new Point(x, y);
-                HarvestQueue.Enqueue(pos);
-            }
         }
         else
         {
-            if (tile.liquid > 0)
+            if (Main.tile[x, y].liquid > 0)
             {
-                int style = tile.frameX / 18;
+                int style = Main.tile[x, y].frameX / 18;
 
-                if ((!tile.lava() || style != 5) && (tile.liquidType() != LiquidID.Water || (style != 1 && style != 4)))
+                if ((!Main.tile[x, y].lava() || style != 5) && (Main.tile[x, y].liquidType() != LiquidID.Water || (style != 1 && style != 4)))
                 {
                     WorldGen.KillTile(x, y);
                     NetMessage.SendTileSquare(-1, x, y);
@@ -104,153 +88,19 @@ public class HerbGarden : TerrariaPlugin
                 }
             }
 
-            if (tile.type == TileID.ImmatureHerbs)
+            if (Main.tile[x, y].type == TileID.ImmatureHerbs)
             {
-                if (WorldGen.genRand.Next(1) == 0)
-                {
-                    tile.type = TileID.MatureHerbs;
-                    NetMessage.SendTileSquare(-1, x, y);
-                    WorldGen.SquareTileFrame(x, y);
-                }
+                Main.tile[x, y].type = TileID.MatureHerbs;
+                NetMessage.SendTileSquare(-1, x, y);
+                WorldGen.SquareTileFrame(x, y);
             }
-            else if (tile.type == TileID.MatureHerbs)
+            else if (Main.tile[x, y].type == TileID.MatureHerbs)
             {
-                if (WorldGen.genRand.Next(1) == 0)
-                {
-                    tile.type = TileID.BloomingHerbs;
-                    NetMessage.SendTileSquare(-1, x, y);
-                    WorldGen.SquareTileFrame(x, y);
-                }
-            }
-            else if (tile.type == TileID.BloomingHerbs &&
-                HasNearbyChest(x, y, Config.HopperRange))
-            {
-                // 如果成熟了，加入队列
-                var pos = new Point(x, y);
-                HarvestQueue.Enqueue(pos);
+                Main.tile[x, y].type = TileID.BloomingHerbs;
+                NetMessage.SendTileSquare(-1, x, y);
+                WorldGen.SquareTileFrame(x, y);
             }
         }
-    }
-
-    // 上次处理队列的时间（避免每帧都处理）
-    private int Tick = 0;
-    // 用于存储需要处理的图格坐标（已成熟的草药）
-    private static ConcurrentQueue<Point> HarvestQueue = new();
-    // 服务器更新事件
-    private void OnGameUpdate(EventArgs args)
-    {
-        // 控制处理频率（每秒处理一次）
-        if (++Tick < Config.QueueInterval) return;
-        Tick = 0;
-
-        // 从队列中取出所有待处理坐标（最多处理一定数量，避免单帧过载）
-        int count = 0;
-        while (HarvestQueue.TryDequeue(out var pos) && count < Config.QueueConut) // 每帧最多处理 20 个
-        {
-            AutoPlace(pos.X, pos.Y);
-            count++;
-        }
-    }
-
-    // 自动种植方法
-    private static Dictionary<Point, int> LastHarvest = new();
-    private static void AutoPlace(int x, int y)
-    {
-        var tile = Main.tile[x, y];
-        if ((tile?.active()) != true ||
-            tile.type != TileID.BloomingHerbs) return;
-
-        var pos = new Point(x, y);
-
-        // 冷却检查：如果距离上次收割不足 60 帧（1 秒），则跳过
-        var now = Environment.TickCount;
-        if (LastHarvest.TryGetValue(pos, out var last) &&
-            now - last < Config.HarvestCooldown)
-            return;
-
-        // 重置为幼苗
-        WorldGen.KillTile(x, y);
-        var drop = GetItemFromTile(x, y);
-        int style = GetStyleFromItemID(drop.type);
-        WorldGen.PlaceTile(x, y, TileID.ImmatureHerbs, true, false, -1, style);
-        tile.type = TileID.ImmatureHerbs;
-        NetMessage.SendTileSquare(-1, x, y);
-        WorldGen.SquareTileFrame(x, y);
-
-        // 记录收割时间
-        LastHarvest[pos] = now;
-    }
-
-    // 如果草药被破坏 则移除
-    private void OnTileEdit(object? sender, GetDataHandlers.TileEditEventArgs e)
-    {
-        // 如果插件未启用，不处理
-        if (!Config.Enabled) return;
-
-        if (e.Action == GetDataHandlers.EditAction.KillTile && e.EditData == 0)
-        {
-            var tile = Main.tile[e.X, e.Y];
-            // 检查是否破坏了草药图格（包括幼苗、成熟、开花）
-            if (tile?.active() == true &&
-                (tile.type == TileID.ImmatureHerbs ||
-                 tile.type == TileID.MatureHerbs ||
-                 tile.type == TileID.BloomingHerbs))
-            {
-                // 从冷却记录中移除该坐标
-                var pos = new Point(e.X, e.Y);
-                LastHarvest.Remove(pos);
-            }
-        }
-    }
-
-    // 获取破坏图格的物品属性
-    public static WorldItem GetItemFromTile(int x, int y)
-    {
-        var noPrefix = false;
-        WorldGen.KillTile_GetItemDrops(x, y, Main.tile[x, y], out int type, out int stack, out _, out _, out noPrefix);
-        WorldItem item = new();
-        item.SetDefaults(type);
-        item.stack = stack;
-        return item;
-    }
-
-    // 根据成熟草药的 物品ID 映射到图格样式
-    private static int GetStyleFromItemID(int type)
-    {
-        switch (type)
-        {
-            case ItemID.Daybloom: return 0; // 太阳花
-            case ItemID.Moonglow: return 1; // 月光草
-            case ItemID.Blinkroot: return 2; // 闪耀根
-            case ItemID.Deathweed: return 3; // 死亡草
-            case ItemID.Waterleaf: return 4; //  幌菊
-            case ItemID.Fireblossom: return 5; // 火焰花
-            case ItemID.Shiverthorn: return 6; // 寒颤棘
-            default: return 0;
-        }
-    }
-
-    // 检查成熟草药附近是否有箱子
-    private static bool HasNearbyChest(int x, int y, int range)
-    {
-        // 范围转换为图格坐标
-        int minX = Math.Max(x - range, 0);
-        int maxX = Math.Min(x + range, Main.maxTilesX - 1);
-        int minY = Math.Max(y - range, 0);
-        int maxY = Math.Min(y + range, Main.maxTilesY - 1);
-
-        for (int tx = minX; tx <= maxX; tx++)
-        {
-            for (int ty = minY; ty <= maxY; ty++)
-            {
-                var tile = Main.tile[tx, ty];
-                if (tile?.active() == true && TileID.Sets.BasicChest[tile.type])
-                {
-                    return true;
-                }
-            }
-        }
-        return false;
     }
     #endregion
 
@@ -276,8 +126,9 @@ public class HerbGarden : TerrariaPlugin
         int c = Chest.FindChest(x, y);
         if (c == -1 || Chest.UsingChest(c) != -1) return;
 
-        int range = Config.HopperRange * 16;
-        Vector2 size = new Vector2(range * 2, range * 2);
+        int tileRange = Config.HopperRange; // 图格半径
+        int pixelRange = tileRange * 16; // 像素半径
+        Vector2 size = new Vector2(pixelRange * 2, pixelRange * 2);
         Vector2 center = new Vector2(x * 16 + 16, y * 16 + 16);
         Rectangle Rect = Terraria.Utils.CenteredRectangle(center, size);
 
@@ -299,13 +150,129 @@ public class HerbGarden : TerrariaPlugin
                 }
             }
         }
+
+        // 自动播种
+        int minX = Math.Max(x - tileRange, 0);
+        int maxX = Math.Min(x + tileRange, Main.maxTilesX - 1);
+        int minY = Math.Max(y - tileRange, 0);
+        int maxY = Math.Min(y + tileRange, Main.maxTilesY - 1);
+        for (int tx = minX; tx <= maxX; tx++)
+        {
+            for (int ty = minY; ty <= maxY; ty++)
+            {
+                var checkTile = Main.tile[tx, ty];
+                if (checkTile?.active() == true && checkTile.type == TileID.BloomingHerbs)
+                {
+                    // 传递箱子坐标
+                    AutoPlace(tx, ty, x, y, c);
+                }
+            }
+        }
     }
     #endregion
 
-    // 草药列表（暂时没用）
-    private static readonly int[] Herbs = Enumerable.Empty<int>()
-        .Concat(Enumerable.Range(ItemID.DaybloomSeeds, 12))
-        .Concat(Enumerable.Range(ItemID.ShiverthornSeeds, 2))
-        .ToArray();
+    #region 自动播种方法
+    private static void AutoPlace(int x, int y, int cX, int cY, int chestIndex)
+    {
+        var tile = Main.tile[x, y];
+        if (tile?.active() != true) return;
 
+        // 1. 先获取掉落物类型（基于当前成熟图格）
+        var drop = GetItem(x, y);
+        var herbType = drop.type;
+        if (herbType == 0) return;
+
+        // 2. 获取对应的种子ID
+        int seedType = GetSeed(herbType);
+
+        // 3. 消耗种子
+        if (seedType != 0)
+        {
+            var chest = Main.chest[chestIndex];
+            int Slot = -1;
+            for (int i = 0; i < chest.item.Length; i++)
+            {
+                if (chest.item[i].type == seedType && chest.item[i].stack > 0)
+                {
+                    Slot = i;
+                    break;
+                }
+            }
+
+            if (Slot != -1)
+            {
+                // 扣除一个种子
+                chest.item[Slot].stack--;
+                if (chest.item[Slot].stack <= 0)
+                    chest.item[Slot].TurnToAir();
+                NetMessage.SendData((int)PacketTypes.ChestItem, -1, -1, null, chestIndex, Slot);
+            }
+        }
+
+        // 4. 生成草药掉落物
+        int stack = Config.Stack > 0 ? Config.Stack : (drop.stack < 1 ? 1 : drop.stack);
+        int idx = Item.NewItem(null, x * 16 + 8, y * 16 + 8, 0, 0, herbType, stack);
+        NetMessage.SendData((int)PacketTypes.ItemDrop, -1, -1, null, idx);
+
+        // 5. 清除原图格并重新种植幼苗
+        WorldGen.KillTile(x, y);
+        int style = GetStyle(herbType);
+        WorldGen.PlaceTile(x, y, TileID.ImmatureHerbs, true, false, -1, style);
+
+        // 6. 刷新图格网络
+        NetMessage.SendTileSquare(-1, x, y);
+        WorldGen.SquareTileFrame(x, y);
+
+        // 7. 报告自动播种
+        if (Config.Broadcast)
+        {
+            // 计算距离
+            int distance = Math.Max(Math.Abs(x - cX), Math.Abs(y - cY));
+            TShock.Utils.Broadcast($"[自动播种] {ItemIcon(drop.type)} 距离箱子:{distance} 格 ({x},{y}) ", color2);
+        }
+    }
+
+    // 获取破坏图格的物品属性
+    public static WorldItem GetItem(int x, int y)
+    {
+        var noPrefix = false;
+        WorldGen.KillTile_GetItemDrops(x, y, Main.tile[x, y], out int type, out int stack, out _, out _, out noPrefix);
+        WorldItem item = new();
+        item.SetDefaults(type);
+        item.stack = stack;
+        return item;
+    }
+
+    // 根据成熟草药的 物品ID 映射到图格样式
+    private static int GetStyle(int type)
+    {
+        switch (type)
+        {
+            case ItemID.Daybloom: return 0; // 太阳花
+            case ItemID.Moonglow: return 1; // 月光草
+            case ItemID.Blinkroot: return 2; // 闪耀根
+            case ItemID.Deathweed: return 3; // 死亡草
+            case ItemID.Waterleaf: return 4; //  幌菊
+            case ItemID.Fireblossom: return 5; // 火焰花
+            case ItemID.Shiverthorn: return 6; // 寒颤棘
+            default: return WorldGen.genRand.Next(7); // 随机 0-6
+        }
+    }
+
+    // 获取种子来自物品ID
+    private static int GetSeed(int herbType)
+    {
+        switch (herbType)
+        {
+            case ItemID.Daybloom: return ItemID.DaybloomSeeds;
+            case ItemID.Moonglow: return ItemID.MoonglowSeeds;
+            case ItemID.Blinkroot: return ItemID.BlinkrootSeeds;
+            case ItemID.Deathweed: return ItemID.DeathweedSeeds;
+            case ItemID.Waterleaf: return ItemID.WaterleafSeeds;
+            case ItemID.Fireblossom: return ItemID.FireblossomSeeds;
+            case ItemID.Shiverthorn: return ItemID.ShiverthornSeeds;
+            default: return 0;
+        }
+    }
+    #endregion
 }
