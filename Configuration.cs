@@ -10,13 +10,17 @@ internal class Configuration
     public bool Enabled { get; set; } = true;
     [JsonProperty("草药随机生长", Order = 1)]
     public bool Random { get; set; } = true;
-    [JsonProperty("草药成熟数量", Order = 2)]
-    public int Stack { get; set; } = 3;
-    [JsonProperty("物品进箱范围", Order = 3)]
-    public int Range { get; set; } = 32;
-    [JsonProperty("物品进箱冷却", Order = 4)]
-    public int CoolDown { get; set; } = 60;
-    [JsonProperty("物品进箱说明", Order = 5)]
+    [JsonProperty("草药收割毫秒", Order = 2)]
+    public int HarvestCooldown { get; set; } = 1000;
+    [JsonProperty("队列处理帧率", Order = 3)]
+    public int QueueInterval { get; set; } = 60;
+    [JsonProperty("队列处理数量", Order = 4)]
+    public int QueueConut { get; set; } = 20;
+    [JsonProperty("物品进箱范围", Order = 5)]
+    public int HopperRange { get; set; } = 32;
+    [JsonProperty("物品进箱冷却", Order = 6)]
+    public int HopperCooldown { get; set; } = 60;
+    [JsonProperty("物品进箱说明", Order = 7)]
     public string Text { get; set; } = "第一次种植需手动放种子到种植盆,给箱子连上电线与计时器,设置好【进箱范围】即可实现自动化种植";
     #endregion
 
