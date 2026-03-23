@@ -77,42 +77,46 @@ public class HerbGarden : TerrariaPlugin
             // 如果草药已经成熟，立即收割
             orig(x, y);
 
-            AutoPlace(x, y, tile);
+            Task.Run(() => { AutoPlace(x, y, tile); });
         }
         else
         {
-            if (tile.liquid > 0)
-            {
-                int style = tile.frameX / 18;
 
-                if ((!tile.lava() || style != 5) && (tile.liquidType() != LiquidID.Water || (style != 1 && style != 4)))
-                {
-                    WorldGen.KillTile(x, y);
-                    NetMessage.SendTileSquare(-1, x, y);
-                    WorldGen.SquareTileFrame(x, y);
-                }
-            }
-
-            if (tile.type == TileID.ImmatureHerbs)
+            Task.Run(() =>
             {
-                if (WorldGen.genRand.Next(1) == 0)
+                if (tile.liquid > 0)
                 {
-                    tile.type = TileID.MatureHerbs;
-                    NetMessage.SendTileSquare(-1, x, y);
-                    WorldGen.SquareTileFrame(x, y);
-                }
-            }
-            else if (tile.type == TileID.MatureHerbs)
-            {
-                if (WorldGen.genRand.Next(1) == 0)
-                {
-                    tile.type = TileID.BloomingHerbs;
-                    NetMessage.SendTileSquare(-1, x, y);
-                    WorldGen.SquareTileFrame(x, y);
-                }
-            }
+                    int style = tile.frameX / 18;
 
-            AutoPlace(x, y, tile);
+                    if ((!tile.lava() || style != 5) && (tile.liquidType() != LiquidID.Water || (style != 1 && style != 4)))
+                    {
+                        WorldGen.KillTile(x, y);
+                        NetMessage.SendTileSquare(-1, x, y);
+                        WorldGen.SquareTileFrame(x, y);
+                    }
+                }
+
+                if (tile.type == TileID.ImmatureHerbs)
+                {
+                    if (WorldGen.genRand.Next(1) == 0)
+                    {
+                        tile.type = TileID.MatureHerbs;
+                        NetMessage.SendTileSquare(-1, x, y);
+                        WorldGen.SquareTileFrame(x, y);
+                    }
+                }
+                else if (tile.type == TileID.MatureHerbs)
+                {
+                    if (WorldGen.genRand.Next(1) == 0)
+                    {
+                        tile.type = TileID.BloomingHerbs;
+                        NetMessage.SendTileSquare(-1, x, y);
+                        WorldGen.SquareTileFrame(x, y);
+                    }
+                }
+
+                AutoPlace(x, y, tile);
+            });
         }
     }
 
