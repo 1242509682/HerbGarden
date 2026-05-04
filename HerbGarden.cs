@@ -15,7 +15,7 @@ public class HerbGarden : TerrariaPlugin
     public static string PluginName => "草药园";
     public override string Name => PluginName;
     public override string Author => "羽学";
-    public override Version Version => new(1, 0, 5);
+    public override Version Version => new(1, 0, 3);
     public override string Description => "电路生长+延迟收割，种子自动合成草药袋。";
     #endregion
 
